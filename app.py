@@ -161,6 +161,10 @@ def process_image_adaptive(image_input):
 # ==========================================
 # 4. 手機版介面設計
 # ==========================================
+# 將設定隱藏在摺疊選單中，保持介面乾淨
+with st.expander("⚙️ 辨識設定 (覺得不準請點這)", expanded=False):
+    conf_thres = st.slider("信心度 (Confidence)", 0.1, 0.8, 0.25, 0.05)
+    img_size = st.selectbox("解析度 (Img Size)", [640, 960, 1280], index=2)
 
 # 圖片來源選擇
 mode = st.radio("選擇輸入方式：", ["📸 開啟相機", "📤 上傳照片"], horizontal=True)
@@ -212,3 +216,4 @@ if image_source is not None:
         st.image(processed_img, caption=f"AI 繪製框線 (Conf: {final_conf})", use_container_width=True)
     with img_tab2:
         st.image(image_source, caption="原始上傳", use_container_width=True)
+

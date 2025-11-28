@@ -71,7 +71,7 @@ def process_image_adaptive(image_input):
     # 初始設定
     current_conf = 0.4   # 起始信心度
     min_conf = 0.1       # 最低底限 (避免降到 0 抓到一堆雜訊)
-    step = 0.05          # 每次降低多少 (5%)
+    step = 0.1           # 每次降低多少 (10%)
     imgsz_setting = 1280 # 固定高解析度
     
     final_res_image = None
@@ -163,7 +163,7 @@ def process_image_adaptive(image_input):
 # ==========================================
 # 將設定隱藏在摺疊選單中，保持介面乾淨
 with st.expander("⚙️ 辨識設定 (覺得不準請點這)", expanded=False):
-    conf_thres = st.slider("信心度 (Confidence)", 0.1, 0.8, 0.25, 0.05)
+    conf_thres = st.slider("信心度 (Confidence)", 0.1, 0.8, current_conf, 0.05)
     img_size = st.selectbox("解析度 (Img Size)", [640, 960, 1280], index=2)
 
 # 圖片來源選擇
@@ -216,4 +216,5 @@ if image_source is not None:
         st.image(processed_img, caption=f"AI 繪製框線 (Conf: {final_conf})", use_container_width=True)
     with img_tab2:
         st.image(image_source, caption="原始上傳", use_container_width=True)
+
 

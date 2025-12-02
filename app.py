@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components  # 引入元件庫，用於執行 JavaScript
 from ultralytics import YOLO
 from PIL import Image
 import cv2
@@ -26,6 +27,7 @@ st.markdown("""
         font-size: 2.5rem !important;
         color: #ff4b4b;
     }
+    /* 調整相機輸入框樣式 */
     .stCameraInput {
         width: 100% !important;
     }
@@ -48,7 +50,54 @@ except Exception as e:
 st.title("🔥 瓦斯表抄表助手")
 
 # ==========================================
-# 3. 核心邏輯 (含自適應迴圈)
+# 3. Javascript 補光燈控制邏輯
+# ==========================================
+def inject_torch_control(enable_torch):
+    """
+    注入 JavaScript 來控制瀏覽器的 MediaStream (補光燈)
+    """
+    torch_state = "true" if enable_torch else "false"
+    
+    js_code = f"""
+    <script>
+    // 設定計時器，因為相機可能還沒完全啟動，每 500ms 檢查一次
+    var attempts = 0;
+    var torchInterval = setInterval(function() {{
+        // 嘗試抓取 Streamlit 的 video 標籤 (位於 iframe 父層)
+        var video = window.parent.document.querySelector('video');
+        
+        if (video && video.srcObject) {{
+            var track = video.srcObject.getVideoTracks()[0];
+            
+            // 檢查瀏覽器是否支援 image-capture (補光燈)
+            var capabilities = track.getCapabilities();
+            if (capabilities.torch) {{
+                track.applyConstraints({{
+                    advanced: [{{ torch: {torch_state} }}]
+                }}).then(() => {{
+                    console.log("補光燈狀態已切換為: {torch_state}");
+                }}).catch(err => {{
+                    console.log("補光燈切換失敗: ", err);
+                }});
+                
+                // 成功抓到後，清除計時器
+                clearInterval(torchInterval);
+            }}
+        }}
+        
+        attempts++;
+        // 嘗試 10 次 (5秒) 後放棄，避免無限執行
+        if (attempts > 10) clearInterval(torchInterval);
+        
+    }}, 500);
+    </script>
+    """
+    # 注入 HTML/JS (高度設為 0 隱藏起來)
+    components.html(js_code, height=0)
+
+
+# ==========================================
+# 4. 核心邏輯 (含自適應迴圈)
 # ==========================================
 
 def is_inside(cx, cy, box_obj):
@@ -173,6 +222,18 @@ mode = st.radio("選擇輸入方式：", ["📸 開啟相機", "📤 上傳照�
 image_source = None
 
 if mode == "📸 開啟相機":
+    # -----------------------------------------------------
+    # 🔦 補光燈開關 (僅在相機模式顯示)
+    # -----------------------------------------------------
+    col_t1, col_t2 = st.columns([0.4, 0.6])
+    with col_t1:
+        use_torch = st.toggle("🔦 開啟補光燈 (Android)", value=False)
+        if use_torch:
+            st.caption("嘗試開啟閃光燈...")
+    
+    # 注入 JS 控制碼
+    inject_torch_control(use_torch)
+    
     camera_file = st.camera_input("請對準瓦斯表拍攝")
     if camera_file:
         image_source = Image.open(camera_file)
@@ -217,3 +278,4 @@ if image_source is not None:
         st.image(processed_img, caption=f"AI 繪製框線 (Conf: {final_conf})", use_container_width=True)
     with img_tab2:
         st.image(image_source, caption="原始上傳", use_container_width=True)
+

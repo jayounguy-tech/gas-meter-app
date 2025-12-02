@@ -68,7 +68,22 @@ def inject_torch_control(enable_torch):
         
         if (video && video.srcObject) {{
             var track = video.srcObject.getVideoTracks()[0];
+
+
+            // 嘗試套用約束條件
+            // 注意：對於已開啟的串流，切換 facingMode 可能無效，但嘗試無妨
+            var constraints = {{
+                advanced: [{{ torch: {torch_state} }}]
+            }};
             
+            track.applyConstraints(constraints)
+            .then(() => {{
+                console.log("相機設定已更新 (Torch: {torch_state})");
+            }}).catch(err => {{
+                console.log("相機設定更新失敗: ", err);
+            }});
+            
+
             // 檢查瀏覽器是否支援 image-capture (補光燈)
             var capabilities = track.getCapabilities();
             if (capabilities.torch) {{

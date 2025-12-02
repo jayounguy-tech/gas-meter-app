@@ -176,7 +176,7 @@ def process_image_adaptive(image_input):
                     
             elif class_name == 'SerialNumber':
                 # 表號擴大範圍 (Padding)
-                pad_w, pad_h = 0, 0
+                pad_w, pad_h = 5, 5
                 x1 = max(0, x1 - pad_w)
                 y1 = max(0, y1 - pad_h)
                 x2 = min(img_w, x2 + pad_w)
@@ -301,5 +301,6 @@ if image_source is not None:
         st.image(processed_img, caption=f"AI 繪製框線 (Conf: {final_conf})", use_container_width=True)
     with img_tab2:
         st.image(image_source, caption="原始上傳", use_container_width=True)
+
 
 

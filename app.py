@@ -4,6 +4,8 @@ from ultralytics import YOLO
 from PIL import Image
 import cv2
 import numpy as np
+import os
+import gdown  # 記得在 requirements.txt 加入 gdown
 
 # ==========================================
 # 1. 頁面基礎設定
@@ -35,16 +37,37 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 載入模型
+# 2. 自動下載模型 (解決 GitHub 檔案限制)
 # ==========================================
 @st.cache_resource
 def load_model():
-    return YOLO('best.pt')
+    model_path = 'best.pt'
+    
+    # 檢查模型是否存在，不存在就下載
+    if not os.path.exists(model_path):
+        st.info("☁️ 正在從 Google Drive 下載模型 (約 40MB)，初次啟動需時較長，請稍候...")
+        try:
+            # ---------------------------------------------------------
+            # ⚠️ 請將下方的 ID 換成你 Google Drive 檔案的 ID ⚠️
+            # 網址範例: https://drive.google.com/file/d/1ABCDE.../view
+            # ID 就是: 1ABCDE...
+            # ---------------------------------------------------------
+            file_id = '1-Wq7P73qno7w8sXWSKiC6lW4JG6uafpJ' 
+            
+            url = f'https://drive.google.com/uc?id={file_id}'
+            gdown.download(url, model_path, quiet=False)
+            st.success("✅ 下載完成！")
+        except Exception as e:
+            st.error(f"❌ 模型下載失敗！請檢查 Google Drive 權限是否設為公開，或 ID 是否正確。\n錯誤訊息: {e}")
+            st.stop()
+            
+    return YOLO(model_path)
 
+# 嘗試載入模型
 try:
     model = load_model()
 except Exception as e:
-    st.error(f"找不到模型檔案 best.pt，請確認檔案位置！\n錯誤: {e}")
+    st.error(f"模型載入發生錯誤: {e}")
     st.stop()
 
 st.title("🔥 瓦斯表抄表助手")
@@ -120,7 +143,7 @@ def process_image_adaptive(image_input):
     # 初始設定
     current_conf = 0.4   # 起始信心度
     min_conf = 0.1       # 最低底限 (避免降到 0 抓到一堆雜訊)
-    step = 0.05          # 每次降低多少 (5%)
+    step = 0.1           # 每次降低多少 (10%)
     imgsz_setting = 1280 # 固定高解析度
     
     final_res_image = None
@@ -153,7 +176,7 @@ def process_image_adaptive(image_input):
                     
             elif class_name == 'SerialNumber':
                 # 表號擴大範圍 (Padding)
-                pad_w, pad_h = 30, 10
+                pad_w, pad_h = 10, 10
                 x1 = max(0, x1 - pad_w)
                 y1 = max(0, y1 - pad_h)
                 x2 = min(img_w, x2 + pad_w)

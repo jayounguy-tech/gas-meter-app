@@ -278,7 +278,9 @@ if image_source is not None:
     # 顯示最終使用的信心度 (讓你知道 AI 多努力)
     if final_conf < 0.4:
         st.caption(f"ℹ️ 已自動降低信心度至 **{final_conf}** 以獲取更多數字")
-
+    else:
+        st.caption(f"ℹ️ 目前信心度 **{final_conf}** ")
+        
     col1, col2 = st.columns(2)
     with col1:
         if len(reading_str) >= 4:
@@ -301,6 +303,7 @@ if image_source is not None:
         st.image(processed_img, caption=f"AI 繪製框線 (Conf: {final_conf})", use_container_width=True)
     with img_tab2:
         st.image(image_source, caption="原始上傳", use_container_width=True)
+
 
 
 

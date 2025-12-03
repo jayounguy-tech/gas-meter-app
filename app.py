@@ -120,46 +120,74 @@ def inject_torch_control(enable_torch):
 
 
 # ==========================================
-# 4. 核心邏輯 (含自適應迴圈)
+# 4. 核心辨識邏輯 (含 Padding、自適應、防重疊)
 # ==========================================
 
 def is_inside(cx, cy, box_obj):
+    """判斷數字中心點是否在大框內"""
     if box_obj is None: return False
     bx1, by1, bx2, by2 = box_obj['coords']
     margin = 10
     in_box = (bx1 - margin < cx < bx2 + margin) and (by1 - margin < cy < by2 + margin)
     if not in_box: return False
+    
+    # 垂直過濾：數字應該在框框高度的中間 20%~80% 區域
     box_height = by2 - by1
     relative_y = (cy - by1) / box_height
     return 0.2 < relative_y < 0.8
 
-def process_image_adaptive(image_input):
+def remove_overlapping_digits(digits_list, iou_threshold=0.3):
     """
-    自適應處理函式：
-    從信心度 0.4 開始嘗試，
-    如果 度數 < 4碼 或 表號 < 6碼，就降低信心度重試。
+    移除重疊的數字框 (保留信心度高的)
+    針對瓦斯表數字，我們特別關注 X 軸的重疊
     """
+    if not digits_list:
+        return []
     
-    # 初始設定
-    current_conf = 0.4   # 起始信心度
-    min_conf = 0.1       # 最低底限 (避免降到 0 抓到一堆雜訊)
-    step = 0.1           # 每次降低多少 (10%)
-    imgsz_setting = 1280 # 固定高解析度
+    # 1. 依照信心度由高到低排序 (優先保留高信心的)
+    sorted_digits = sorted(digits_list, key=lambda x: x['conf'], reverse=True)
+    final_digits = []
+    
+    for current in sorted_digits:
+        is_duplicate = False
+        for kept in final_digits:
+            # 計算 X 軸重疊 (1D IoU)
+            # 兩個區間 [x1, x2] 的重疊長度
+            x_left = max(current['x1'], kept['x1'])
+            x_right = min(current['x2'], kept['x2'])
+            overlap_width = max(0, x_right - x_left)
+            
+            # 計算較小那個框的寬度
+            min_width = min(current['x2'] - current['x1'], kept['x2'] - kept['x1'])
+            
+            # 如果重疊超過寬度的 30%，視為重複 (或者是包含關係)
+            if min_width > 0 and (overlap_width / min_width) > iou_threshold:
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            final_digits.append(current)
+            
+    return final_digits
+
+def process_image_adaptive(image_input):
+    current_conf = 0.4
+    min_conf = 0.1
+    step = 0.1
+    imgsz_setting = 1280
     
     final_res_image = None
     final_reading = ""
     final_serial = ""
     used_conf = current_conf
 
-    # --- 自適應迴圈 (Adaptive Loop) ---
     while current_conf >= min_conf:
-        
         # 1. 執行預測
-        results = model(image_input, conf=current_conf, iou=0.5, imgsz=imgsz_setting, verbose=False)
+        # 【關鍵修改】加入 agnostic_nms=True，強制跨類別抑制重疊 (例如 3 和 8 重疊只留一個)
+        results = model(image_input, conf=current_conf, iou=0.5, imgsz=imgsz_setting, agnostic_nms=True, verbose=False)
         result = results[0]
         img_h, img_w = result.orig_shape
         
-        # 2. 解析資料
         gas_meter_box = None      
         serial_number_box = None  
         digits_found = []         
@@ -175,8 +203,8 @@ def process_image_adaptive(image_input):
                     gas_meter_box = {'coords': [x1, y1, x2, y2], 'conf': conf}
                     
             elif class_name == 'SerialNumber':
-                # 表號擴大範圍 (Padding)
-                pad_w, pad_h = 8, 5
+                # Padding 擴大
+                pad_w, pad_h = 10, 10
                 x1 = max(0, x1 - pad_w)
                 y1 = max(0, y1 - pad_h)
                 x2 = min(img_w, x2 + pad_w)
@@ -188,44 +216,50 @@ def process_image_adaptive(image_input):
             elif class_name.isdigit():
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
-                digits_found.append({'val': class_name, 'cx': center_x, 'cy': center_y, 'x1': x1})
+                # 儲存更多資訊以便後續過濾 (x1, x2)
+                digits_found.append({
+                    'val': class_name, 
+                    'cx': center_x, 
+                    'cy': center_y, 
+                    'x1': x1, 
+                    'x2': x2, 
+                    'conf': conf
+                })
 
-        # 3. 分配數字
-        reading_digits = []
-        serial_digits = []
+        # 2. 初步分類數字
+        raw_reading_digits = []
+        raw_serial_digits = []
+        
         for d in digits_found:
             if is_inside(d['cx'], d['cy'], gas_meter_box):
-                reading_digits.append(d)
+                raw_reading_digits.append(d)
             elif is_inside(d['cx'], d['cy'], serial_number_box):
-                serial_digits.append(d)
+                raw_serial_digits.append(d)
 
+        # 3. 【關鍵修改】執行防重疊過濾 (移除幽靈數字)
+        reading_digits = remove_overlapping_digits(raw_reading_digits, iou_threshold=0.3)
+        serial_digits = remove_overlapping_digits(raw_serial_digits, iou_threshold=0.3)
+
+        # 4. 排序與組合
         reading_digits.sort(key=lambda x: x['x1'])
         serial_digits.sort(key=lambda x: x['x1'])
         
         temp_reading = "".join([d['val'] for d in reading_digits])
         temp_serial = "".join([d['val'] for d in serial_digits])
         
-        # 4. 檢查條件：是否滿足位數要求？
-        # 條件：度數 >= 4碼 且 表號 >= 6碼 (表號有時候可能只有 5 或 8，可視情況調整)
         condition_met = (len(temp_reading) >= 4) and (len(temp_serial) >= 6)
         
-        # 暫存這次的結果
         final_reading = temp_reading
         final_serial = temp_serial
         used_conf = current_conf
         
-        # 產出圖片
         res_plotted = result.plot()
         final_res_image = cv2.cvtColor(res_plotted, cv2.COLOR_BGR2RGB)
 
-        # 5. 判斷是否要跳出迴圈
         if condition_met:
-            break  # 成功抓齊了，收工！
+            break
         
-        # 如果還沒抓齊，降低信心度，準備跑下一輪
         current_conf -= step
-        
-        # 防止浮點數運算誤差導致無限迴圈
         current_conf = round(current_conf, 2)
 
     return final_res_image, final_reading, final_serial, used_conf
@@ -278,9 +312,7 @@ if image_source is not None:
     # 顯示最終使用的信心度 (讓你知道 AI 多努力)
     if final_conf < 0.4:
         st.caption(f"ℹ️ 已自動降低信心度至 **{final_conf}** 以獲取更多數字")
-    else:
-        st.caption(f"ℹ️ 目前信心度 **{final_conf}** ")
-        
+
     col1, col2 = st.columns(2)
     with col1:
         if len(reading_str) >= 4:
@@ -303,8 +335,4 @@ if image_source is not None:
         st.image(processed_img, caption=f"AI 繪製框線 (Conf: {final_conf})", use_container_width=True)
     with img_tab2:
         st.image(image_source, caption="原始上傳", use_container_width=True)
-
-
-
-
 
